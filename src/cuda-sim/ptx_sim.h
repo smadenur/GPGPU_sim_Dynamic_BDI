@@ -427,6 +427,7 @@ public:
    memory_space   *m_local_mem;
    ptx_cta_info   *m_cta_info;
    ptx_reg_t m_last_set_operand_value;
+   ptx_reg_t m_modified_operand;//MAD_DB
 
 private:
 

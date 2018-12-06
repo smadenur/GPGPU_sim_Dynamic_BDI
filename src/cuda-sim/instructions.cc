@@ -66,6 +66,7 @@ void ptx_thread_info::set_reg( const symbol *reg, const ptx_reg_t &value )
    if (m_enable_debug_trace ) 
       m_debug_trace_regs_modified.back()[ reg ] = value;
    m_last_set_operand_value = value;
+   m_modified_operand = value;//MAD_DB
 }
 
 ptx_reg_t ptx_thread_info::get_reg( const symbol *reg )

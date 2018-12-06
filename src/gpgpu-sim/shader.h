@@ -512,7 +512,9 @@ public:
    void init( unsigned num_banks, shader_core_ctx *shader );
 
    // modifiers
-   bool writeback( const warp_inst_t &warp ); // might cause stall 
+   bool writeback( const warp_inst_t &warp , ptx_thread_info** m_thread); // might cause stall 
+   bool writeback( const warp_inst_t &warp); // might cause stall 
+   unsigned implement_BDI(const warp_inst_t inst, ptx_thread_info** m_thread);
 
    void step()
    {
@@ -1075,6 +1077,7 @@ class cache_t;
 
 class ldst_unit: public pipelined_simd_unit {
 public:
+
     ldst_unit( mem_fetch_interface *icnt,
                shader_core_mem_fetch_allocator *mf_allocator,
                shader_core_ctx *core, 
@@ -1083,10 +1086,12 @@ public:
                const shader_core_config *config, 
                const memory_config *mem_config,  
                class shader_core_stats *stats, 
-               unsigned sid, unsigned tpc );
+               unsigned sid, unsigned tpc
+                );
 
     // modifiers
     virtual void issue( register_set &inst );
+    //virtual void cycle();
     virtual void cycle();
      
     void fill( mem_fetch *mf );
@@ -1130,7 +1135,8 @@ protected:
                shader_core_stats *stats,
                unsigned sid,
                unsigned tpc,
-               l1_cache* new_l1d_cache );
+               l1_cache* new_l1d_cache
+                );
     void init( mem_fetch_interface *icnt,
                shader_core_mem_fetch_allocator *mf_allocator,
                shader_core_ctx *core, 
@@ -1140,7 +1146,8 @@ protected:
                const memory_config *mem_config,  
                shader_core_stats *stats,
                unsigned sid,
-               unsigned tpc );
+               unsigned tpc
+               );
 
 protected:
    bool shared_cycle( warp_inst_t &inst, mem_stage_stall_type &rc_fail, mem_stage_access_type &fail_type);
@@ -1162,6 +1169,7 @@ protected:
    class shader_core_ctx *m_core;
    unsigned m_sid;
    unsigned m_tpc;
+   
 
    tex_cache *m_L1T; // texture cache
    read_only_cache *m_L1C; // constant cache
@@ -1748,6 +1756,7 @@ public:
     void init_warps(unsigned cta_id, unsigned start_thread, unsigned end_thread);
     virtual void checkExecutionStatusAndUpdate(warp_inst_t &inst, unsigned t, unsigned tid);
     address_type next_pc( int tid ) const;
+    //void implement_BDI(const warp_inst_t &inst);
     void fetch();
     void register_cta_thread_exit( unsigned cta_num );
 

@@ -1254,7 +1254,8 @@ void shader_core_ctx::writeback()
     	 * no stalling).
     	 */
 
-        m_operand_collector.writeback(*pipe_reg);
+        m_operand_collector.writeback(*pipe_reg, m_thread);
+        //implement_BDI(*pipe_reg);
         unsigned warp_id = pipe_reg->warp_id();
         m_scoreboard->releaseRegisters( pipe_reg );
         m_warp[warp_id].dec_inst_in_pipeline();
@@ -1561,7 +1562,8 @@ void ldst_unit::init( mem_fetch_interface *icnt,
                       const memory_config *mem_config,  
                       shader_core_stats *stats,
                       unsigned sid,
-                      unsigned tpc )
+                      unsigned tpc
+                      )
 {
     m_memory_config = mem_config;
     m_icnt = icnt;
@@ -1598,7 +1600,8 @@ ldst_unit::ldst_unit( mem_fetch_interface *icnt,
                       const memory_config *mem_config,  
                       shader_core_stats *stats,
                       unsigned sid,
-                      unsigned tpc ) : pipelined_simd_unit(NULL,config,3,core), m_next_wb(config)
+                      unsigned tpc
+                      ) : pipelined_simd_unit(NULL,config,3,core), m_next_wb(config)
 {
     init( icnt,
           mf_allocator,
@@ -1609,7 +1612,8 @@ ldst_unit::ldst_unit( mem_fetch_interface *icnt,
           mem_config,  
           stats, 
           sid,
-          tpc );
+          tpc
+          );
     if( !m_config->m_L1D_config.disabled() ) {
         char L1D_name[STRSIZE];
         snprintf(L1D_name, STRSIZE, "L1D_%03d", m_sid);
@@ -1633,7 +1637,8 @@ ldst_unit::ldst_unit( mem_fetch_interface *icnt,
                       shader_core_stats *stats,
                       unsigned sid,
                       unsigned tpc,
-                      l1_cache* new_l1d_cache )
+                      l1_cache* new_l1d_cache
+                       )
     : pipelined_simd_unit(NULL,config,3,core), m_L1D(new_l1d_cache), m_next_wb(config)
 {
     init( icnt,
@@ -1645,7 +1650,8 @@ ldst_unit::ldst_unit( mem_fetch_interface *icnt,
           mem_config,  
           stats, 
           sid,
-          tpc );
+          tpc
+          );
 }
 
 void ldst_unit:: issue( register_set &reg_set )
@@ -2961,6 +2967,81 @@ int register_bank(int regnum, int wid, unsigned num_banks, unsigned bank_warp_sh
    return bank % num_banks;
 }
 
+unsigned opndcoll_rfu_t::implement_BDI(const warp_inst_t inst, ptx_thread_info** m_thread)
+{
+        unsigned warpId = inst.warp_id(); 
+        unsigned int value;
+ 	unsigned int base, delta, diff;
+	unsigned zero_bin = 0;
+        unsigned one_bin = 0;
+        unsigned two_bin = 0;
+	for (unsigned t=0; t < 32; t++) {
+      		if (inst.active(t)) {
+			if (warpId==(unsigned(-1)))
+				warpId = inst.warp_id();
+			unsigned tid = m_warp_size*warpId+t;
+		//	printf("MAD_DB: MODIFIED %d\n", m_thread[tid]->m_modified_operand.u32);
+                	value = m_thread[tid]->m_modified_operand.u32;
+ 			if (t == 0) {
+				base = value;
+			} else {
+				delta = value;
+				diff = (base > delta)?(base - delta):(delta-base);
+				if (diff == 0)
+					zero_bin++;
+				else if (delta <= 127)
+					one_bin++;
+				else if (delta <= 32767)
+					two_bin++;
+			}
+		}
+	}
+	if (zero_bin >= 31)
+                return 1;
+	else if (one_bin >= 31)
+                return 9;
+	else if (two_bin >= 31)
+                return 17;
+	else
+ 		return 32;
+}
+
+bool opndcoll_rfu_t::writeback( const warp_inst_t &inst , ptx_thread_info** m_thread)
+{
+   assert( !inst.empty() );
+   std::list<unsigned> regs = m_shader->get_regs_written(inst);
+   std::list<unsigned>::iterator r;
+   unsigned n=0;
+   unsigned savings = 0;
+   for( r=regs.begin(); r!=regs.end();r++,n++ ) {
+      unsigned reg = *r;
+      unsigned bank = register_bank(reg,inst.warp_id(),m_num_banks,m_bank_warp_shift);
+      if( m_arbiter.bank_idle(bank) ) {
+          m_arbiter.allocate_bank_for_write(bank,op_t(&inst,reg,m_num_banks,m_bank_warp_shift));
+      } else {
+          return false;
+      }
+   }
+   savings = implement_BDI(inst,  m_thread);
+   for(unsigned i=0;i<(unsigned)regs.size();i++){
+	      if(m_shader->get_config()->gpgpu_clock_gated_reg_file){
+	    	  unsigned active_count=0;
+	    	  for(unsigned i=0;i<m_shader->get_config()->warp_size;i=i+m_shader->get_config()->n_regfile_gating_group){
+	    		  for(unsigned j=0;j<m_shader->get_config()->n_regfile_gating_group;j++){
+	    			  if(inst.get_active_mask().test(i+j)){
+	    				  active_count+=m_shader->get_config()->n_regfile_gating_group;
+	    				  break;
+	    			  }
+	    		  }
+	    	  }
+	    	  m_shader->incregfile_writes(savings);
+	      }else{
+	    	  m_shader->incregfile_writes(savings);//inst.active_count());
+	      }
+   }
+   return true;
+}
+
 bool opndcoll_rfu_t::writeback( const warp_inst_t &inst )
 {
    assert( !inst.empty() );
@@ -2976,7 +3057,7 @@ bool opndcoll_rfu_t::writeback( const warp_inst_t &inst )
           return false;
       }
    }
-   for(unsigned i=0;i<(unsigned)regs.size();i++){
+   /*for(unsigned i=0;i<(unsigned)regs.size();i++){
 	      if(m_shader->get_config()->gpgpu_clock_gated_reg_file){
 	    	  unsigned active_count=0;
 	    	  for(unsigned i=0;i<m_shader->get_config()->warp_size;i=i+m_shader->get_config()->n_regfile_gating_group){
@@ -2991,7 +3072,7 @@ bool opndcoll_rfu_t::writeback( const warp_inst_t &inst )
 	      }else{
 	    	  m_shader->incregfile_writes(m_shader->get_config()->warp_size);//inst.active_count());
 	      }
-   }
+   }*/
    return true;
 }
 
@@ -3075,9 +3156,11 @@ void opndcoll_rfu_t::allocate_reads()
     			  }
     		  }
     	  }
-    	  m_shader->incregfile_reads(active_count);
+    	  //m_shader->incregfile_reads(active_count);
+          m_shader->incregfile_reads(17);
       }else{
-    	  m_shader->incregfile_reads(m_shader->get_config()->warp_size);//op.get_active_count());
+    	  //m_shader->incregfile_reads(m_shader->get_config()->warp_size);//op.get_active_count());
+    	  m_shader->incregfile_reads(17);//op.get_active_count());
       }
   }
 } 

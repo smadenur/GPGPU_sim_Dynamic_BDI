@@ -792,6 +792,7 @@ void core_t::execute_warp_inst_t(warp_inst_t &inst, unsigned warpId)
                 warpId = inst.warp_id();
             unsigned tid=m_warp_size*warpId+t;
             m_thread[tid]->ptx_exec_inst(inst,t);
+            //printf("MAD_DB: MODIFIED %lld\n", m_thread[tid]->m_modified_operand.u64);
             
             //virtual function
             checkExecutionStatusAndUpdate(inst,t,tid);
